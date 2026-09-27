@@ -4,18 +4,18 @@ import json
 import pandas as pd
 from curl_cffi import requests
 
-# Creazione di una sessione che imita al 100% il browser Chrome a livello di TLS e rete
+# Sessione che simula Chrome su Windows
 session = requests.Session(impersonate="chrome120")
 
 url_pagina = "https://www.fantacalcio.it/quotazioni-fantacalcio"
-url_excel = "https://www.fantacalcio.it/servizi/Excel/Quotazioni_Fantacalcio_Stagione_2026_27.xlsx"
+url_excel = "https://www.fantacalcio.it/api/v1/Excel/prices/21/1"
 
 try:
-    print("1. Visita alla pagina delle quotazioni con impronta Chrome reale...")
+    print("1. Visita alla pagina delle quotazioni...")
     res_page = session.get(url_pagina, timeout=30)
     print(f"   Risposta pagina: HTTP {res_page.status_code}")
 
-    print("\n2. Richiesta download del file Excel...")
+    print(f"\n2. Richiesta download all'endpoint API reale:\n   {url_excel}")
     headers_download = {
         "Referer": url_pagina,
         "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
@@ -26,20 +26,25 @@ try:
     print(f"   Content-Type ricevuto: {response.headers.get('Content-Type')}")
     print(f"   Dimensione scaricata: {len(response.content)} bytes")
 
-    # Salvataggio del file
+    # Salvataggio temporaneo per analisi
     with open("quotazioni.xlsx", "wb") as f:
         f.write(response.content)
 
     primi_byte = response.content[:10]
     print(f"   Primi byte: {primi_byte}")
 
-    # Verifica: i file Excel .xlsx iniziano SEMPRE con la firma binaria b'PK\x03\x04'
+    # Verifica firma standard file Excel (b'PK\x03\x04')
     if not primi_byte.startswith(b"PK\x03\x04"):
-        print("\nBLOCCO ANCORA ATTIVO: Ricevuto HTML anziché il file Excel.")
+        print("\nRISPOSTA NON VALIDA (Richiede autenticazione o token):")
+        try:
+            print("Estratto risposta server:\n", response.text[:400])
+        except Exception:
+            pass
         sys.exit(1)
 
     print("\nFile Excel autentico confermato! Inizio elaborazione...")
     df = pd.read_excel("quotazioni.xlsx", engine="openpyxl", skiprows=1)
+    print(f"Colonne rilevate nel file Excel: {list(df.columns)}")
 
     players = []
     for _, row in df.iterrows():
