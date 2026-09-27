@@ -21,6 +21,9 @@ jobs:
         run: pip install pandas openpyxl requests curl_cffi
 
       - name: Scarica ed Elabora Dati
+        env:
+          FANTA_EMAIL: ${{ secrets.FANTA_EMAIL }}
+          FANTA_PASSWORD: ${{ secrets.FANTA_PASSWORD }}
         run: python scraper.py
 
       - name: Salva Dati Aggiornati
