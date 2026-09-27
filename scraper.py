@@ -4,47 +4,77 @@ import json
 import pandas as pd
 from curl_cffi import requests
 
-# Sessione che simula Chrome su Windows
+email = os.environ.get("FANTA_EMAIL")
+password = os.environ.get("FANTA_PASSWORD")
+
+if not email or not password:
+    print("ERRORE: Le variabili d'ambiente FANTA_EMAIL o FANTA_PASSWORD non sono state configurate nei GitHub Secrets.")
+    sys.exit(1)
+
 session = requests.Session(impersonate="chrome120")
 
-url_pagina = "https://www.fantacalcio.it/quotazioni-fantacalcio"
-url_excel = "https://www.fantacalcio.it/api/v1/Excel/prices/21/1"
+login_url = "https://www.fantacalcio.it/api/v1/User/login"
+download_url = "https://www.fantacalcio.it/api/v1/Excel/prices/21/1"
 
 try:
-    print("1. Visita alla pagina delle quotazioni...")
-    res_page = session.get(url_pagina, timeout=30)
-    print(f"   Risposta pagina: HTTP {res_page.status_code}")
+    print("1. Inizializzazione sessione e raccolta cookie base...")
+    session.get("https://www.fantacalcio.it", timeout=20)
 
-    print(f"\n2. Richiesta download all'endpoint API reale:\n   {url_excel}")
-    headers_download = {
-        "Referer": url_pagina,
-        "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
+    print("2. Tentativo di autenticazione con credenziali protette...")
+    login_payload = {
+        "username": email,
+        "password": password,
+        "rememberMe": True
+    }
+    
+    headers_auth = {
+        "Referer": "https://www.fantacalcio.it/",
+        "Origin": "https://www.fantacalcio.it",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*"
     }
 
-    response = session.get(url_excel, headers=headers_download, timeout=30)
-    print(f"   Status HTTP: {response.status_code}")
-    print(f"   Content-Type ricevuto: {response.headers.get('Content-Type')}")
-    print(f"   Dimensione scaricata: {len(response.content)} bytes")
+    res_login = session.post(login_url, json=login_payload, headers=headers_auth, timeout=25)
+    print(f"   Esito Login HTTP: {res_login.status_code}")
 
-    # Salvataggio temporaneo per analisi
+    # Estrazione dell'eventuale Bearer Token se presente nella risposta JSON
+    auth_token = None
+    try:
+        login_data = res_login.json()
+        auth_token = login_data.get("token") or login_data.get("data", {}).get("token")
+        if auth_token:
+            print("   Token di autorizzazione Bearer rilevato.")
+    except Exception:
+        pass
+
+    print("\n3. Download del listone Excel...")
+    headers_download = {
+        "Referer": "https://www.fantacalcio.it/quotazioni-fantacalcio",
+        "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
+    }
+    if auth_token:
+        headers_download["Authorization"] = f"Bearer {auth_token}"
+
+    res_file = session.get(download_url, headers=headers_download, timeout=30)
+    print(f"   Status HTTP Download: {res_file.status_code}")
+    print(f"   Dimensione scaricata: {len(res_file.content)} bytes")
+
     with open("quotazioni.xlsx", "wb") as f:
-        f.write(response.content)
+        f.write(res_file.content)
 
-    primi_byte = response.content[:10]
+    primi_byte = res_file.content[:10]
     print(f"   Primi byte: {primi_byte}")
 
-    # Verifica firma standard file Excel (b'PK\x03\x04')
     if not primi_byte.startswith(b"PK\x03\x04"):
-        print("\nRISPOSTA NON VALIDA (Richiede autenticazione o token):")
+        print("\nERRORE: La risposta non è un file Excel valido.")
         try:
-            print("Estratto risposta server:\n", response.text[:400])
+            print("Dettaglio risposta:", res_file.text[:400])
         except Exception:
             pass
         sys.exit(1)
 
-    print("\nFile Excel autentico confermato! Inizio elaborazione...")
+    print("\nFile Excel autenticato con successo! Elaborazione dati in corso...")
     df = pd.read_excel("quotazioni.xlsx", engine="openpyxl", skiprows=1)
-    print(f"Colonne rilevate nel file Excel: {list(df.columns)}")
 
     players = []
     for _, row in df.iterrows():
@@ -72,8 +102,8 @@ try:
     with open("dati_serie_a.json", "w", encoding="utf-8") as f:
         json.dump(players, f, ensure_ascii=False, indent=2)
 
-    print(f"\nCompletato con successo! Generati {len(players)} giocatori in dati_serie_a.json.")
+    print(f"\nOperazione riuscita: generato 'dati_serie_a.json' con {len(players)} calciatori.")
 
 except Exception as e:
-    print(f"\nErrore durante l'elaborazione: {e}")
+    print(f"\nErrore imprevisto durante l'esecuzione: {e}")
     sys.exit(1)
