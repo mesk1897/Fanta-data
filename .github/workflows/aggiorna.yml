@@ -1,0 +1,32 @@
+name: Aggiorna Dati Fantacalcio
+on:
+  schedule:
+    - cron: '0 6 * * 2' # Esegue ogni martedì alle 06:00 UTC
+  workflow_dispatch: # Permette l'avvio manuale a comando
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Installa Librerie
+        run: pip install pandas openpyxl requests
+
+      - name: Scarica ed Elabora Dati
+        run: python scraper.py
+
+      - name: Salva Dati Aggiornati
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add dati_serie_a.json
+          git commit -m "Auto-update dati Serie A" || exit 0
+          git push
