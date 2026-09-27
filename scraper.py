@@ -4,40 +4,61 @@ import json
 import requests
 import pandas as pd
 
-# URL dell'export ufficiale Fantacalcio
-url = "https://www.fantacalcio.it/servizi/Excel/Quotazioni_Fantacalcio_Stagione_2026_27.xlsx"
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Creazione di una sessione HTTP per conservare i cookie come un vero browser
+session = requests.Session()
+
+# Header completi da browser desktop moderno
+headers_browser = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "keep-alive",
+    "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1"
 }
 
-print(f"Connessione a: {url}")
+session.headers.update(headers_browser)
+
+url_pagina = "https://www.fantacalcio.it/quotazioni-fantacalcio"
+url_excel = "https://www.fantacalcio.it/servizi/Excel/Quotazioni_Fantacalcio_Stagione_2026_27.xlsx"
 
 try:
-    response = requests.get(url, headers=headers, timeout=30)
-    print(f"Status HTTP: {response.status_code}")
-    print(f"Content-Type: {response.headers.get('Content-Type')}")
-    print(f"Dimensione scaricata: {len(response.content)} bytes")
+    print(f"1. Visita alla pagina delle quotazioni per ottenere i cookie di sessione...")
+    res_page = session.get(url_pagina, timeout=30)
+    print(f"   Risposta pagina: HTTP {res_page.status_code}")
 
-    # Salva quanto scaricato
+    print(f"\n2. Richiesta download del file Excel con Referer impostato...")
+    headers_download = {
+        "Referer": url_pagina,
+        "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors"
+    }
+
+    response = session.get(url_excel, headers=headers_download, timeout=30)
+    print(f"   Status HTTP: {response.status_code}")
+    print(f"   Content-Type ricevuto: {response.headers.get('Content-Type')}")
+    print(f"   Dimensione scaricata: {len(response.content)} bytes")
+
+    # Salvataggio su disco
     with open("quotazioni.xlsx", "wb") as f:
         f.write(response.content)
 
-    # Ispezione dei primi byte
-    with open("quotazioni.xlsx", "rb") as f:
-        primi_byte = f.read(250)
-        print(f"Primi byte ricevuti: {primi_byte}")
+    primi_byte = response.content[:10]
+    print(f"   Primi byte: {primi_byte}")
 
-    # Verifica se c'è stato un errore di rete (es. 403 o 404)
-    if response.status_code != 200:
-        print(f"\nERRORE HTTP {response.status_code}: Il server non ha inviato il file.")
+    # Verifica: i file Excel .xlsx iniziano SEMPRE con la firma binaria b'PK\x03\x04'
+    if not primi_byte.startswith(b"PK\x03\x04"):
+        print("\nBLOCCO ANCORA ATTIVO: Il server ha risposto con codice 200 ma il contenuto è HTML (protezione attiva).")
         sys.exit(1)
 
-    # Verifica se è una pagina web di errore o captcha invece di un file Excel
-    if primi_byte.startswith(b"<!DOCTYPE") or primi_byte.startswith(b"<html") or b"<head>" in primi_byte:
-        print("\nBLOCCO RILEVATO: Il server ha risposto con una pagina HTML (possibile protezione anti-bot o link non valido) anziché con il file Excel.")
-        sys.exit(1)
-
-    # Lettura del file Excel con motore openpyxl
+    print("\nFile Excel autentico confermato! Inizio elaborazione...")
     df = pd.read_excel("quotazioni.xlsx", engine="openpyxl", skiprows=1)
 
     players = []
@@ -66,8 +87,8 @@ try:
     with open("dati_serie_a.json", "w", encoding="utf-8") as f:
         json.dump(players, f, ensure_ascii=False, indent=2)
 
-    print(f"\nCompletato: salvati {len(players)} giocatori in dati_serie_a.json.")
+    print(f"\nCompletato con successo! Generati {len(players)} giocatori in dati_serie_a.json.")
 
 except Exception as e:
-    print(f"\nErrore durante l'elaborazione: {e}")
-    raise e
+    print(f"\nErrore inaspettato: {e}")
+    sys.exit(1)
