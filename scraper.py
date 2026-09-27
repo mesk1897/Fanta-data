@@ -1,44 +1,24 @@
 import os
 import sys
 import json
-import requests
 import pandas as pd
+from curl_cffi import requests
 
-# Creazione di una sessione HTTP per conservare i cookie come un vero browser
-session = requests.Session()
-
-# Header completi da browser desktop moderno
-headers_browser = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Connection": "keep-alive",
-    "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1"
-}
-
-session.headers.update(headers_browser)
+# Creazione di una sessione che imita al 100% il browser Chrome a livello di TLS e rete
+session = requests.Session(impersonate="chrome120")
 
 url_pagina = "https://www.fantacalcio.it/quotazioni-fantacalcio"
 url_excel = "https://www.fantacalcio.it/servizi/Excel/Quotazioni_Fantacalcio_Stagione_2026_27.xlsx"
 
 try:
-    print(f"1. Visita alla pagina delle quotazioni per ottenere i cookie di sessione...")
+    print("1. Visita alla pagina delle quotazioni con impronta Chrome reale...")
     res_page = session.get(url_pagina, timeout=30)
     print(f"   Risposta pagina: HTTP {res_page.status_code}")
 
-    print(f"\n2. Richiesta download del file Excel con Referer impostato...")
+    print("\n2. Richiesta download del file Excel...")
     headers_download = {
         "Referer": url_pagina,
         "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors"
     }
 
     response = session.get(url_excel, headers=headers_download, timeout=30)
@@ -46,7 +26,7 @@ try:
     print(f"   Content-Type ricevuto: {response.headers.get('Content-Type')}")
     print(f"   Dimensione scaricata: {len(response.content)} bytes")
 
-    # Salvataggio su disco
+    # Salvataggio del file
     with open("quotazioni.xlsx", "wb") as f:
         f.write(response.content)
 
@@ -55,7 +35,7 @@ try:
 
     # Verifica: i file Excel .xlsx iniziano SEMPRE con la firma binaria b'PK\x03\x04'
     if not primi_byte.startswith(b"PK\x03\x04"):
-        print("\nBLOCCO ANCORA ATTIVO: Il server ha risposto con codice 200 ma il contenuto è HTML (protezione attiva).")
+        print("\nBLOCCO ANCORA ATTIVO: Ricevuto HTML anziché il file Excel.")
         sys.exit(1)
 
     print("\nFile Excel autentico confermato! Inizio elaborazione...")
@@ -90,5 +70,5 @@ try:
     print(f"\nCompletato con successo! Generati {len(players)} giocatori in dati_serie_a.json.")
 
 except Exception as e:
-    print(f"\nErrore inaspettato: {e}")
+    print(f"\nErrore durante l'elaborazione: {e}")
     sys.exit(1)
