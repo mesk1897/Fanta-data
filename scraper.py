@@ -14,7 +14,8 @@ if not email or not password:
 session = requests.Session(impersonate="chrome120")
 
 login_url = "https://www.fantacalcio.it/api/v1/User/login"
-download_url = "https://www.fantacalcio.it/api/v1/Excel/prices/21/1"
+url_prices = "https://www.fantacalcio.it/api/v1/Excel/prices/21/1"
+url_stats = "https://www.fantacalcio.it/api/v1/Excel/stats/21/1"
 
 def pulisci_numero(valore, default=0.0):
     if pd.isnull(valore):
@@ -28,10 +29,9 @@ def pulisci_numero(valore, default=0.0):
         return default
 
 try:
-    print("1. Inizializzazione sessione...")
+    print("1. Inizializzazione sessione e login...")
     session.get("https://www.fantacalcio.it", timeout=20)
 
-    print("2. Login account...")
     login_payload = {
         "username": email,
         "password": password,
@@ -52,7 +52,6 @@ try:
     except Exception:
         pass
 
-    print("3. Download file Excel...")
     headers_down = {
         "Referer": "https://www.fantacalcio.it/quotazioni-fantacalcio",
         "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
@@ -60,58 +59,96 @@ try:
     if auth_token:
         headers_down["Authorization"] = f"Bearer {auth_token}"
 
-    res_file = session.get(download_url, headers=headers_down, timeout=30)
-
+    print("2. Download Quotazioni (prices)...")
+    res_prices = session.get(url_prices, headers=headers_down, timeout=30)
     with open("quotazioni.xlsx", "wb") as f:
-        f.write(res_file.content)
+        f.write(res_prices.content)
 
-    # Legge l'Excel
-    df = pd.read_excel("quotazioni.xlsx", engine="openpyxl", skiprows=1)
+    xl_prices = pd.ExcelFile("quotazioni.xlsx", engine="openpyxl")
+    print(f"Fogli presenti in quotazioni.xlsx: {xl_prices.sheet_names}")
 
-    # Rende tutti i nomi delle colonne in MAIUSCOLO e senza spazi vuoti
-    df.columns = [str(c).strip().upper() for c in df.columns]
-    print(f"Colonne rilevate nel file: {list(df.columns)}")
+    df_prices = pd.read_excel("quotazioni.xlsx", sheet_name=0, engine="openpyxl", skiprows=1)
+    df_prices.columns = [str(c).strip().upper() for c in df_prices.columns]
+
+    df_stats = None
+    if len(xl_prices.sheet_names) > 1:
+        print("Trovato foglio statistiche all'interno di quotazioni.xlsx")
+        df_stats = pd.read_excel("quotazioni.xlsx", sheet_name=1, engine="openpyxl", skiprows=1)
+        df_stats.columns = [str(c).strip().upper() for c in df_stats.columns]
+    else:
+        print("3. Download Statistiche ufficiali (stats)...")
+        headers_stats = {
+            "Referer": "https://www.fantacalcio.it/statistiche-fantacalcio",
+            "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
+        }
+        if auth_token:
+            headers_stats["Authorization"] = f"Bearer {auth_token}"
+
+        res_stats = session.get(url_stats, headers=headers_stats, timeout=30)
+        if res_stats.status_code == 200 and res_stats.content[:4] == b"PK\x03\x04":
+            with open("statistiche.xlsx", "wb") as f:
+                f.write(res_stats.content)
+            df_stats = pd.read_excel("statistiche.xlsx", engine="openpyxl", skiprows=1)
+            df_stats.columns = [str(c).strip().upper() for c in df_stats.columns]
+            print(f"Colonne rilevate nel file statistiche: {list(df_stats.columns)}")
+        else:
+            print(f"Download stats non riuscito direttamente (HTTP {res_stats.status_code}).")
+
+    # Mappatura statistiche indicizzate per ID giocatore
+    stats_by_id = {}
+    if df_stats is not None:
+        for _, row in df_stats.iterrows():
+            try:
+                p_id = int(row.get("ID", 0)) if pd.notnull(row.get("ID")) else 0
+                if p_id == 0:
+                    continue
+                stats_by_id[p_id] = {
+                    "fantaMedia": round(pulisci_numero(row.get("FM", row.get("FANTAMEDIA", 0.0))), 2),
+                    "mediaVoto": round(pulisci_numero(row.get("MV", row.get("MEDIAVOTO", 0.0))), 2),
+                    "presenze": int(pulisci_numero(row.get("PV", row.get("PG", 0)))),
+                    "gol": int(pulisci_numero(row.get("GF", row.get("GOL", 0)))),
+                    "assist": int(pulisci_numero(row.get("ASS", row.get("AS", 0)))),
+                    "ammonizioni": int(pulisci_numero(row.get("AMM", 0))),
+                    "espulsioni": int(pulisci_numero(row.get("ESP", 0)))
+                }
+            except Exception:
+                continue
 
     players = []
-    for _, row in df.iterrows():
+    for _, row in df_prices.iterrows():
         try:
             nome = str(row.get("NOME", "")).strip()
             if not nome or nome.lower() == "nan":
                 continue
 
-            # Gestione dinamica dei possibili nomi colonna
+            p_id = int(row.get("ID", 0)) if pd.notnull(row.get("ID")) else 0
             ruolo = str(row.get("R", row.get("RUOLO", ""))).strip()
             squadra = str(row.get("SQUADRA", "")).strip()
-            
-            # Quotazione (Qt.A o QUOTAZIONE)
-            qt = int(pulisci_numero(row.get("QT.A", row.get("QT", row.get("QUOTAZIONE", 1))), default=1))
-            
-            # Statistiche: gestione FM, MV, presenze e bonus/malus
-            fm = pulisci_numero(row.get("FM", row.get("FANTAMEDIA", 0.0)))
-            mv = pulisci_numero(row.get("MV", row.get("MEDIAVOTO", row.get("MEDIA VOTO", 0.0))))
-            
-            # Presenze (PV o PG)
-            pv = int(pulisci_numero(row.get("PV", row.get("PG", row.get("PRESENZE", 0))), default=0))
-            
-            # Gol, Assist, Malus
-            gf = int(pulisci_numero(row.get("GF", row.get("GOL", 0)), default=0))
-            ass = int(pulisci_numero(row.get("ASS", row.get("AS", row.get("ASSIST", 0))), default=0))
-            amm = int(pulisci_numero(row.get("AMM", row.get("AMMONIZIONI", 0)), default=0))
-            esp = int(pulisci_numero(row.get("ESP", row.get("ESPULSIONI", 0)), default=0))
+            qt = int(pulisci_numero(row.get("QT.A", row.get("QT", 1)), default=1))
+
+            st = stats_by_id.get(p_id, {
+                "fantaMedia": 0.0,
+                "mediaVoto": 0.0,
+                "presenze": 0,
+                "gol": 0,
+                "assist": 0,
+                "ammonizioni": 0,
+                "espulsioni": 0
+            })
 
             players.append({
-                "id": int(row.get("ID", 0)) if pd.notnull(row.get("ID")) else 0,
+                "id": p_id,
                 "ruolo": ruolo,
                 "nome": nome,
                 "squadra": squadra,
                 "quotazione": qt,
-                "fantaMedia": round(fm, 2),
-                "mediaVoto": round(mv, 2),
-                "presenze": pv,
-                "gol": gf,
-                "assist": ass,
-                "ammonizioni": amm,
-                "espulsioni": esp,
+                "fantaMedia": st["fantaMedia"],
+                "mediaVoto": st["mediaVoto"],
+                "presenze": st["presenze"],
+                "gol": st["gol"],
+                "assist": st["assist"],
+                "ammonizioni": st["ammonizioni"],
+                "espulsioni": st["espulsioni"],
                 "status": "disponibile"
             })
         except Exception:
@@ -120,7 +157,7 @@ try:
     with open("dati_serie_a.json", "w", encoding="utf-8") as f:
         json.dump(players, f, ensure_ascii=False, indent=2)
 
-    print(f"Completato con successo: {len(players)} giocatori elaborati con statistiche reali.")
+    print(f"\nOperazione completata: salvati {len(players)} calciatori con Quotazioni e Statistiche reali.")
 
 except Exception as e:
     print(f"Errore durante l'elaborazione: {e}")
