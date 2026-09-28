@@ -8,7 +8,7 @@ email = os.environ.get("FANTA_EMAIL")
 password = os.environ.get("FANTA_PASSWORD")
 
 if not email or not password:
-    print("ERRORE: Credenziali mancanti nei Secrets.")
+    print("ERRORE: Credenziali mancanti nei GitHub Secrets.")
     sys.exit(1)
 
 session = requests.Session(impersonate="chrome120")
@@ -29,7 +29,7 @@ def pulisci_numero(valore, default=0.0):
         return default
 
 try:
-    print("1. Inizializzazione sessione e login...")
+    print("1. Login a Fantacalcio.it...")
     session.get("https://www.fantacalcio.it", timeout=20)
 
     login_payload = {
@@ -59,61 +59,58 @@ try:
     if auth_token:
         headers_down["Authorization"] = f"Bearer {auth_token}"
 
-    print("2. Download Quotazioni (prices)...")
+    # 1. DOWNLOAD QUOTAZIONI
+    print("\n2. Download file Quotazioni (prices)...")
     res_prices = session.get(url_prices, headers=headers_down, timeout=30)
     with open("quotazioni.xlsx", "wb") as f:
         f.write(res_prices.content)
 
-    xl_prices = pd.ExcelFile("quotazioni.xlsx", engine="openpyxl")
-    print(f"Fogli presenti in quotazioni.xlsx: {xl_prices.sheet_names}")
-
     df_prices = pd.read_excel("quotazioni.xlsx", sheet_name=0, engine="openpyxl", skiprows=1)
     df_prices.columns = [str(c).strip().upper() for c in df_prices.columns]
+    print(f"Quotazioni caricate. Colonne: {list(df_prices.columns)}")
 
-    df_stats = None
-    if len(xl_prices.sheet_names) > 1:
-        print("Trovato foglio statistiche all'interno di quotazioni.xlsx")
-        df_stats = pd.read_excel("quotazioni.xlsx", sheet_name=1, engine="openpyxl", skiprows=1)
-        df_stats.columns = [str(c).strip().upper() for c in df_stats.columns]
-    else:
-        print("3. Download Statistiche ufficiali (stats)...")
-        headers_stats = {
-            "Referer": "https://www.fantacalcio.it/statistiche-fantacalcio",
-            "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
-        }
-        if auth_token:
-            headers_stats["Authorization"] = f"Bearer {auth_token}"
+    # 2. DOWNLOAD STATISTICHE
+    print("\n3. Download file Statistiche (stats)...")
+    headers_stats = headers_down.copy()
+    headers_stats["Referer"] = "https://www.fantacalcio.it/statistiche-fantacalcio"
 
-        res_stats = session.get(url_stats, headers=headers_stats, timeout=30)
-        if res_stats.status_code == 200 and res_stats.content[:4] == b"PK\x03\x04":
-            with open("statistiche.xlsx", "wb") as f:
-                f.write(res_stats.content)
-            df_stats = pd.read_excel("statistiche.xlsx", engine="openpyxl", skiprows=1)
-            df_stats.columns = [str(c).strip().upper() for c in df_stats.columns]
-            print(f"Colonne rilevate nel file statistiche: {list(df_stats.columns)}")
-        else:
-            print(f"Download stats non riuscito direttamente (HTTP {res_stats.status_code}).")
+    res_stats = session.get(url_stats, headers=headers_stats, timeout=30)
+    with open("statistiche.xlsx", "wb") as f:
+        f.write(res_stats.content)
 
-    # Mappatura statistiche indicizzate per ID giocatore
+    df_stats = pd.read_excel("statistiche.xlsx", sheet_name=0, engine="openpyxl", skiprows=1)
+    df_stats.columns = [str(c).strip().upper() for c in df_stats.columns]
+    print(f"Statistiche caricate. Colonne: {list(df_stats.columns)}")
+
+    # 3. MAPPATURA STATISTICHE PER ID
     stats_by_id = {}
-    if df_stats is not None:
-        for _, row in df_stats.iterrows():
-            try:
-                p_id = int(row.get("ID", 0)) if pd.notnull(row.get("ID")) else 0
-                if p_id == 0:
-                    continue
-                stats_by_id[p_id] = {
-                    "fantaMedia": round(pulisci_numero(row.get("FM", row.get("FANTAMEDIA", 0.0))), 2),
-                    "mediaVoto": round(pulisci_numero(row.get("MV", row.get("MEDIAVOTO", 0.0))), 2),
-                    "presenze": int(pulisci_numero(row.get("PV", row.get("PG", 0)))),
-                    "gol": int(pulisci_numero(row.get("GF", row.get("GOL", 0)))),
-                    "assist": int(pulisci_numero(row.get("ASS", row.get("AS", 0)))),
-                    "ammonizioni": int(pulisci_numero(row.get("AMM", 0))),
-                    "espulsioni": int(pulisci_numero(row.get("ESP", 0)))
-                }
-            except Exception:
+    for _, row in df_stats.iterrows():
+        try:
+            p_id = int(row.get("ID", 0)) if pd.notnull(row.get("ID")) else 0
+            if p_id == 0:
                 continue
 
+            fm = pulisci_numero(row.get("FM", row.get("FANTAMEDIA", 0.0)))
+            mv = pulisci_numero(row.get("MV", row.get("MEDIAVOTO", 0.0)))
+            pv = int(pulisci_numero(row.get("PV", row.get("PG", 0))))
+            gf = int(pulisci_numero(row.get("GF", row.get("GOL", 0))))
+            ass = int(pulisci_numero(row.get("ASS", row.get("AS", 0))))
+            amm = int(pulisci_numero(row.get("AMM", 0)))
+            esp = int(pulisci_numero(row.get("ESP", 0)))
+
+            stats_by_id[p_id] = {
+                "fantaMedia": round(fm, 2),
+                "mediaVoto": round(mv, 2),
+                "presenze": pv,
+                "gol": gf,
+                "assist": ass,
+                "ammonizioni": amm,
+                "espulsioni": esp
+            }
+        except Exception:
+            continue
+
+    # 4. UNIONE CON QUOTAZIONI E CREAZIONE DATASET
     players = []
     for _, row in df_prices.iterrows():
         try:
@@ -157,8 +154,11 @@ try:
     with open("dati_serie_a.json", "w", encoding="utf-8") as f:
         json.dump(players, f, ensure_ascii=False, indent=2)
 
-    print(f"\nOperazione completata: salvati {len(players)} calciatori con Quotazioni e Statistiche reali.")
+    print(f"\nOperazione completata con successo: generati {len(players)} giocatori.")
+    print("Esempio primo giocatore elaborato:")
+    if players:
+        print(json.dumps(players[0], indent=2, ensure_ascii=False))
 
 except Exception as e:
-    print(f"Errore durante l'elaborazione: {e}")
+    print(f"\nErrore durante l'elaborazione: {e}")
     sys.exit(1)
