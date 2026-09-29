@@ -945,6 +945,21 @@
     "status": "disponibile"
   },
   {
+    "id": 283,
+    "ruolo": "P",
+    "nome": "Neto",
+    "squadra": "Juventus",
+    "quotazione": 1,
+    "fantaMedia": 0.0,
+    "mediaVoto": 0.0,
+    "presenze": 0,
+    "gol": 0,
+    "assist": 0,
+    "ammonizioni": 0,
+    "espulsioni": 0,
+    "status": "disponibile"
+  },
+  {
     "id": 254,
     "ruolo": "D",
     "nome": "Dimarco",
@@ -3484,21 +3499,6 @@
     "ruolo": "D",
     "nome": "Cabal",
     "squadra": "Juventus",
-    "quotazione": 1,
-    "fantaMedia": 0.0,
-    "mediaVoto": 0.0,
-    "presenze": 0,
-    "gol": 0,
-    "assist": 0,
-    "ammonizioni": 0,
-    "espulsioni": 0,
-    "status": "disponibile"
-  },
-  {
-    "id": 327,
-    "ruolo": "D",
-    "nome": "Patric",
-    "squadra": "Lazio",
     "quotazione": 1,
     "fantaMedia": 0.0,
     "mediaVoto": 0.0,
