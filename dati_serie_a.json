@@ -3810,6 +3810,21 @@
     "status": "disponibile"
   },
   {
+    "id": 7633,
+    "ruolo": "D",
+    "nome": "Obric",
+    "squadra": "Atalanta",
+    "quotazione": 1,
+    "fantaMedia": 0.0,
+    "mediaVoto": 0.0,
+    "presenze": 0,
+    "gol": 0,
+    "assist": 0,
+    "ammonizioni": 0,
+    "espulsioni": 0,
+    "status": "disponibile"
+  },
+  {
     "id": 6875,
     "ruolo": "C",
     "nome": "Paz N.",
